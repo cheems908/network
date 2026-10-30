@@ -1,0 +1,4 @@
+CNSCC231 binary-transfer fixture
+\x00 and \xff in this line are literal marker text; the byte-for-byte test also
+uses generated non-text bytes to verify that the server and proxy never decode a
+response body.

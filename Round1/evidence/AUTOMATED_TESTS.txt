@@ -1,0 +1,31 @@
+Evidence ID: R1-PARSE-01 and R1-DEADLINE-02
+Date: 2026-10-28
+Environment: Ubuntu Linux 7.0.0-38-generic, Python 3.14.4
+Command (from Round1): python3 -m unittest discover -s tests -v
+
+Expected:
+- constructed Echo Request verifies to checksum zero;
+- IPv4 IHL/options and truncation are handled safely;
+- Echo Reply source, identifier and sequence must match;
+- ICMP errors are matched from their quoted original IP/ICMP request;
+- an unrelated reply does not restart the fixed deadline.
+- Traceroute increments TTL, stops on a matching Echo Reply, and continues over
+  silent hops until its configured maximum.
+
+Actual:
+test_destination_unreachable_uses_quoted_probe ... ok
+test_echo_reply_requires_source_id_and_sequence ... ok
+test_echo_request_has_valid_checksum_and_fields ... ok
+test_ipv4_parser_uses_ihl_instead_of_assuming_twenty_bytes ... ok
+test_time_exceeded_matches_quoted_original_probe ... ok
+test_truncated_packets_are_rejected ... ok
+test_unrelated_packet_does_not_restart_timeout ... ok
+test_silent_hops_continue_until_maximum ... ok
+test_ttl_increases_and_matching_echo_stops_trace ... ok
+
+Ran 9 tests in 0.002s
+OK
+
+Interpretation:
+These are deterministic, simulated packet tests. They prove parser and matcher
+behaviour; they are not presented as live network captures.

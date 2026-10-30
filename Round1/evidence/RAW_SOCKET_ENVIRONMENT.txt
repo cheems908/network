@@ -1,0 +1,17 @@
+Evidence ID: R1-LIVE-03 (environment failure)
+Date: 2026-10-28
+Environment: managed Ubuntu Linux development container, Python 3.14.4
+Command: python3 ICMPPing.py 127.0.0.1 --count 2 --timeout 1 --interval 0.1
+
+Expected: two matching loopback Echo Replies when raw ICMP is permitted.
+
+Actual:
+PING 127.0.0.1 (127.0.0.1) with 56 data bytes
+ping: raw ICMP socket permission denied; run with the privileges required by your operating system
+
+Exit status: 2
+
+Interpretation:
+The managed environment denied SOCK_RAW even when the test was allowed outside
+the normal filesystem sandbox. This is retained as the required error evidence.
+It is not a successful live Ping test. Repeat on the final Windows/macOS system.

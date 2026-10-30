@@ -1,0 +1,2 @@
+English, 中文, Ελληνικά, and emoji: 🌐
+Content-Length must count encoded bytes, not characters.

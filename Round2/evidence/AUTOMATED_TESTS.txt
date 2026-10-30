@@ -1,0 +1,28 @@
+Evidence IDs: R2-SERVER-01, R2-SERVER-02, R2-PROXY-03, R2-PROXY-04
+Date: 2026-10-28
+Environment: Ubuntu Linux 7.0.0-38-generic, Python 3.14.4
+Command (from Round2): python3 -m unittest discover -s tests -v
+
+Actual:
+test_https_and_connect_are_rejected ... ok
+test_proxy_rewrites_target_and_relays_binary_response ... ok
+test_unavailable_origin_returns_502_and_proxy_can_run_again ... ok
+test_binary_file_is_returned_byte_for_byte ... ok
+test_fragmented_request_returns_complete_utf8_file ... ok
+test_missing_method_and_traversal_errors ... ok
+test_symlink_cannot_escape_document_root ... ok
+
+Ran 7 tests in 0.008s
+OK
+
+Selected observed behaviour:
+- proxy relayed a 2,148-byte response containing 2,048 generated body bytes;
+- unavailable origin returned 502 Connection refused;
+- a following request relayed a complete 200 response without restarting code;
+- server returned 200 for UTF-8 and sample files;
+- missing file, unsupported method and escaped paths returned 404/405/403.
+
+Interpretation:
+The tests use real local stream sockets and deliberately fragmented writes. The
+proxy test creates a real temporary TCP origin listener and compares every relayed
+byte. This evidence does not replace the final-system curl logs and packet capture.

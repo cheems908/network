@@ -1,5 +1,5 @@
 *   Trying 127.0.0.1:8080...
-* Established connection to 127.0.0.1 (127.0.0.1 port 8080) from 127.0.0.1 port 49088 
+* Established connection to 127.0.0.1 (127.0.0.1 port 8080) from 127.0.0.1 port 54626 
 * using HTTP/1.x
 > GET http://127.0.0.1:8000/index.html HTTP/1.1
 > Host: 127.0.0.1:8000

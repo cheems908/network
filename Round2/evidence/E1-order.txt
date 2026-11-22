@@ -1,0 +1,4 @@
+A: partial request sent
+B: HTTP/1.1 200 OK
+A: sending final blank line
+A: HTTP/1.1 200 OK

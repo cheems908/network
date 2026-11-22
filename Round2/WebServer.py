@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
+from email.utils import formatdate
 import mimetypes
 from pathlib import Path
 import socket
+from threading import BoundedSemaphore
 from urllib.parse import unquote_to_bytes, urlsplit
 
 
@@ -92,6 +95,8 @@ def make_response(
     body: bytes,
     content_type: str,
     extra_headers: dict[str, str] | None = None,
+    *,
+    head_only: bool = False,
 ) -> bytes:
     headers = {
         "Content-Type": content_type,
@@ -102,10 +107,11 @@ def make_response(
         headers.update(extra_headers)
     head = [f"HTTP/1.1 {status} {reason}"]
     head.extend(f"{name}: {value}" for name, value in headers.items())
-    return ("\r\n".join(head) + "\r\n\r\n").encode("iso-8859-1") + body
+    header_bytes = ("\r\n".join(head) + "\r\n\r\n").encode("iso-8859-1")
+    return header_bytes if head_only else header_bytes + body
 
 
-def error_response(error: HTTPError) -> bytes:
+def error_response(error: HTTPError, *, head_only: bool = False) -> bytes:
     body = f"{error.status} {error.reason}\n{error.detail}\n".encode("utf-8")
     return make_response(
         error.status,
@@ -113,19 +119,23 @@ def error_response(error: HTTPError) -> bytes:
         body,
         "text/plain; charset=utf-8",
         error.headers,
+        head_only=head_only,
     )
 
 
 def handle_request(
-    connection: socket.socket, client_address, document_root: Path, timeout: float
+    connection: socket.socket, client_address, document_root: Path, timeout: float,
+    cache_file: Path | None = None,
 ) -> None:
     connection.settimeout(timeout)
+    method = ""
     try:
         header_block = read_request_headers(connection)
         method, target, _, _ = parse_request(header_block)
-        if method != "GET":
+        if method not in ("GET", "HEAD"):
             raise HTTPError(
-                405, "Method Not Allowed", "only GET is supported", {"Allow": "GET"}
+                405, "Method Not Allowed", "only GET and HEAD are supported",
+                {"Allow": "GET, HEAD"},
             )
         file_path = locate_file(document_root, target)
         body = file_path.read_bytes()
@@ -134,19 +144,27 @@ def handle_request(
             media_type = "application/octet-stream"
         elif media_type.startswith("text/"):
             media_type += "; charset=utf-8"
-        response = make_response(200, "OK", body, media_type)
+        cache_headers = None
+        if file_path == cache_file:
+            cache_headers = {
+                "Date": formatdate(usegmt=True),
+                "Cache-Control": "public, max-age=30",
+            }
+        response = make_response(
+            200, "OK", body, media_type, cache_headers, head_only=method == "HEAD"
+        )
         connection.sendall(response)
-        print(f"{client_address[0]}:{client_address[1]} GET {target} -> 200")
+        print(f"{client_address[0]}:{client_address[1]} {method} {target} -> 200")
     except socket.timeout:
         error = HTTPError(408, "Request Timeout", "request headers timed out")
         try:
-            connection.sendall(error_response(error))
+            connection.sendall(error_response(error, head_only=method == "HEAD"))
         except OSError:
             pass
         print(f"{client_address}: request timed out")
     except HTTPError as error:
         try:
-            connection.sendall(error_response(error))
+            connection.sendall(error_response(error, head_only=method == "HEAD"))
         except OSError:
             pass
         print(f"{client_address}: -> {error.status} ({error.detail})")
@@ -154,11 +172,30 @@ def handle_request(
         print(f"{client_address}: connection error: {exc}")
 
 
-def start_server(address: str, port: int, document_root: Path, timeout: float) -> None:
+def start_server(
+    address: str, port: int, document_root: Path, timeout: float,
+    workers: int = 4, cache_file: Path | None = None,
+) -> None:
     root = document_root.resolve()
     if not root.is_dir():
         raise ValueError(f"document root is not a directory: {root}")
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+    if cache_file is not None:
+        cache_file = (root / cache_file).resolve()
+        if not cache_file.is_relative_to(root) or not cache_file.is_file():
+            raise ValueError("--cache-file must name a file inside the document root")
+
+    slots = BoundedSemaphore(workers)
+
+    def serve_connection(connection: socket.socket, client_address) -> None:
+        try:
+            with connection:
+                handle_request(connection, client_address, root, timeout, cache_file)
+        finally:
+            slots.release()
+
+    with ThreadPoolExecutor(max_workers=workers) as pool, socket.socket(
+        socket.AF_INET, socket.SOCK_STREAM
+    ) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((address, port))
         server.listen()
@@ -166,9 +203,20 @@ def start_server(address: str, port: int, document_root: Path, timeout: float) -
         print(f"Serving {root} on http://{shown_address}:{port}")
         try:
             while True:
-                connection, client_address = server.accept()
-                with connection:
-                    handle_request(connection, client_address, root, timeout)
+                # Once all workers are busy, leave new connections in the TCP backlog.
+                if not slots.acquire(timeout=0.5):
+                    continue
+                try:
+                    connection, client_address = server.accept()
+                except OSError:
+                    slots.release()
+                    raise
+                try:
+                    pool.submit(serve_connection, connection, client_address)
+                except RuntimeError:
+                    connection.close()
+                    slots.release()
+                    raise
         except KeyboardInterrupt:
             print("\nServer stopped")
 
@@ -200,13 +248,22 @@ def parse_args() -> argparse.Namespace:
         "--directory", type=Path, default=Path(__file__).resolve().parent
     )
     parser.add_argument("--timeout", type=positive_float, default=5.0)
-    return parser.parse_args()
+    parser.add_argument("--workers", type=int, default=4, help="maximum concurrent clients")
+    parser.add_argument(
+        "--cache-file", type=Path, help="mark one served file public and fresh for 30 seconds"
+    )
+    args = parser.parse_args()
+    if args.workers < 1:
+        parser.error("--workers must be greater than zero")
+    return args
 
 
 def main() -> int:
     args = parse_args()
     try:
-        start_server(args.address, args.port, args.directory, args.timeout)
+        start_server(
+            args.address, args.port, args.directory, args.timeout, args.workers, args.cache_file
+        )
     except (OSError, ValueError) as exc:
         print(f"server: {exc}")
         return 2

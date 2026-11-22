@@ -1,0 +1,7 @@
+HTTP/1.1 502 Bad Gateway
+Content-Type: text/plain; charset=utf-8
+Content-Length: 73
+Connection: close
+
+502 Bad Gateway
+origin connection failed: [Errno 111] Connection refused

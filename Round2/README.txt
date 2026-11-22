@@ -2,11 +2,11 @@ CNSCC231 Round 2
 
 1. Team and environment
 
-Team: [TEAM NUMBER]. Members: [ADD ALL SIX NAMES AND STUDENT IDS]. Development checks were run on Ubuntu Linux 7.0.0-38-generic with Python 3.14.4 on 28 October 2026. Repeat the demonstrations on the final course-accepted Windows or macOS machine and replace this environment entry before submission.
+Team: [TEAM NUMBER]. Members: [ADD ALL SIX NAMES AND STUDENT IDS]. Manual test environment: [OS AND VERSION, PYTHON VERSION, TEST DATE].
 
 2. How to run
 
-Open two terminals in Round2. No third-party packages are used.
+Open two terminals in Round2. Start the Web Server first, then the Proxy. No third-party packages are used. Keep index.html and files/second.html for the manual tests.
 
 Terminal 1:
 
@@ -18,29 +18,66 @@ Terminal 2:
 
 Direct request:
 
-    curl -i http://127.0.0.1:8000/index.html
+    curl --noproxy "*" -i http://127.0.0.1:8000/index.html
 
 Forced proxy request (the empty `--noproxy` prevents curl bypassing localhost):
 
-    curl --noproxy "" -x http://127.0.0.1:8080 http://127.0.0.1:8000/index.html -D proxy-headers.txt -o proxy-body.html
+    curl --noproxy "" -x http://127.0.0.1:8080 http://127.0.0.1:8000/index.html -i
 
 Use `py` in place of `python3` on Windows if needed. Both programs handle one request per connection, close it, and continue accepting later connections. `--help` documents configurable timeouts and ports.
 
 3. Tests and findings
 
-R2-SERVER-01 (normal and framing): `python3 -m unittest discover -s tests -v`. A GET header was sent in three writes. Expected: the server waits for CRLF-CRLF, ignores the query when locating the file, and reports the UTF-8 body's encoded byte length. Actual: 200, exact bytes and correct Content-Length. A sample binary body also matched by SHA-256.
+See MANUAL_TESTS.md for commands and evidence collection. Include the
+guide and the referenced evidence in the submission ZIP.
 
-R2-SERVER-02 (failure/security): missing file, POST, encoded `..`, and a symlink to an external file. Expected: 404, 405 with Allow: GET, and 403 for both escape attempts. Actual: all passed and later test requests still worked.
+S1. Requested index.html and files/second.html directly. Expected two
+200 responses with correct headers and matching bodies. Both returned
+200 OK with Content-Length: 170 and Connection: close. Each 170-byte body
+matched its source file byte for byte.
+Evidence: evidence/S1-index-headers.txt, evidence/S1-index.html,
+evidence/S1-second-headers.txt and evidence/S1-second.html.
 
-R2-PROXY-03 (normal): a local origin split a 2,048-byte generated binary body over multiple sends. Expected: the proxy rewrites the absolute URL to origin-form, rebuilds Host with the non-default port, adds Connection: close, and relays every response byte. Actual: request headers matched and the complete response was byte-identical.
+S2. Requested a missing file, then requested index.html. Expected 404
+followed by 200. Observed 404 Not Found with a file-does-not-exist message,
+then 200 OK for the valid file.
+Evidence: evidence/S2-missing.txt and evidence/S2-recovery.txt.
 
-R2-PROXY-04 (failure): a closed local origin port, HTTPS URL and CONNECT. Expected: 502, 400 and 405 respectively. Actual: all passed; no process restart was needed. Evidence for all cases: `evidence/AUTOMATED_TESTS.txt`.
+P1. Requested index.html directly and through the proxy. Expected matching
+200 responses and two TCP connections for the proxied request. Both
+responses returned 200 OK with identical headers and 170-byte bodies
+that matched index.html. On loopback, the client connected from port 49088
+to proxy port 8080 and sent the absolute URL. The proxy connected from
+port 38480 to origin port 8000 and sent GET /index.html HTTP/1.1 with
+Host: 127.0.0.1:8000. The direct comparison used ports 57292 to 8000.
+Evidence: evidence/P1-loopback.pcapng, evidence/P1-client-trace.txt,
+evidence/P1-direct-headers.txt, evidence/P1-proxy-headers.txt,
+evidence/P1-direct.html and evidence/P1-proxy.html.
 
-Before submission, save curl headers/body hashes plus server and proxy logs or a pcap showing client-to-proxy and proxy-to-origin TCP connections. Modify a served file and request it again to demonstrate there is no stale cache.
+P2. Changed the proxied path to /files/second.html. Expected 200 and the
+second file's contents. Observed 200 OK with Content-Length: 170, and the
+download matched files/second.html byte for byte.
+Evidence: evidence/P2-headers.txt and evidence/P2-second.html.
+
+P3. Stopped the origin and requested index.html through the proxy, then
+restarted the origin and repeated the request. Expected 502 while the
+origin was down and 200 after it restarted. Observed 502 Bad Gateway
+with an origin connection refused error, then 200 OK with a body that
+matched index.html byte for byte.
+Evidence: evidence/P3-origin-down.txt and evidence/P3-recovery.txt.
+
+The server accumulates bytes across recv() calls and recognises the end
+of the request headers at CRLF-CRLF. A TCP receive call can return only
+part of the headers, including part of the delimiter.
 
 4. Limitations
 
-The programs support plain HTTP/1.1 GET only, one request per connection. They do not implement TLS, CONNECT, caching, persistent connections or concurrency. The proxy transparently streams close-delimited, Content-Length and chunked framing; it logs a Content-Length mismatch but cannot replace a response after any bytes have reached the client. A slow client can delay this intentionally single-threaded design.
+The programs support plain HTTP/1.1 GET only, one request per connection.
+They do not implement TLS, CONNECT, caching, persistent connections or concurrency.
+The proxy transparently streams close-delimited, Content-Length and chunked framing;
+it logs a Content-Length mismatch
+but cannot replace a response after any bytes have reached the client.
+A slow client can delay this intentionally single-threaded design.
 
 5. Contributions and sources
 
